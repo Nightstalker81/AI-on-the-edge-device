@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en" xml:lang="en">
+
+<head>
+  <title>Display Validation</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=720" />
+
+  <script>
+    (function () {
+      let theme;
+      try { theme = localStorage.getItem('theme'); } catch (e) { }
+      if (theme !== 'light' && theme !== 'dark') {
+        try { theme = document.cookie.match(/(?:^|; )theme=(light|dark)/)?.[1]; } catch (e) { }
+        if (!theme) theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.classList.remove('light', 'dark');
+      document.documentElement.classList.add(theme);
+    })();
+  </script>
+
+  <link rel="stylesheet" href="style-iframe.css?v=$COMMIT_HASH" />
+  <link href="firework.css?v=$COMMIT_HASH" rel="stylesheet" />
+  <script src="firework.js?v=$COMMIT_HASH"></script>
+  <style>
+    .header-actions,
+    .roi-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .roi-controls input[type='number'] {
+      width: 70px;
+      padding: 3px 5px;
+      border: 1px solid var(--border);
+      border-radius: var(--input-radius);
+    }
+
+    #canvas {
+      max-width: 100%;
+      height: auto;
+      touch-action: none;
+    }
+
+    .setting-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="container-header">
+      <div class="container-title"><span>🔎</span>Display Validation</div>
+      <details>
+        <summary>Usage information</summary>
+        <div class="info-box">
+          <p>
+            Select one or more areas in the reference image that identify the desired display page, such as the unit labels.
+            Every selected area must match before digit recognition is started. The comparison is made after image alignment.
+          </p>
+          <p>
+            Select <b>Add region</b>, then drag a rectangle around a stable display feature. Choose an area large enough to
+            contain the complete feature, but avoid changing digits. Adjust the similarity threshold if lighting or camera
+            differences cause false rejections.
+          </p>
+        </div>
+      </details>
+    </div>
+
+    <div class="container-content">
+      <div class="card">
+        <div class="card-header">
+          <span>Reference Image</span>
+          <div class="header-actions">
+            <input id="add_region" class="button" type="button" value="Add region" onclick="startAddRegion()" disabled />
+            <input id="remove_region" class="button" type="button" value="Remove region" onclick="removeSelectedRegion()" disabled />
+          </div>
+        </div>
+        <div class="card-body">
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 200px; width: 100%">
+            <img id="img_loading" alt="Loading..." />
+            <canvas id="canvas" hidden></canvas>
+            <div id="canvas_message" style="padding: 8px"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span>Validation Settings</span>
+          <input class="button btn-action" type="button" id="save_validation" value="Save And Apply" onclick="saveValidation()" disabled />
+        </div>
+        <div class="card-body">
+          <div class="setting-row">
+            <label><input id="validation_enabled" type="checkbox" /> Enable display validation</label>
+            <label for="similarity_threshold">Similarity threshold (%)</label>
+            <input id="similarity_threshold" type="number" min="1" max="100" value="95" style="width: 70px" />
+          </div>
+          <div class="setting-row">
+            <label for="roi_selection">Selected region</label>
+            <select id="roi_selection" onchange="selectionChanged()" disabled></select>
+            <span id="region_count">No regions configured</span>
+          </div>
+          <div class="setting-row roi-controls">
+            <label>x <input id="roi_x" type="number" min="1" value="1" onchange="updateSelectedRegion()" disabled /></label>
+            <label>y <input id="roi_y" type="number" min="1" value="1" onchange="updateSelectedRegion()" disabled /></label>
+            <label>width <input id="roi_width" type="number" min="1" value="10" onchange="updateSelectedRegion()" disabled /></label>
+            <label>height <input id="roi_height" type="number" min="1" value="10" onchange="updateSelectedRegion()" disabled /></label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="global.js?v=$COMMIT_HASH"></script>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const context = canvas.getContext('2d');
+    const imageObj = new Image();
+    let regions = [];
+    let selectedRegion = -1;
+    let isAddingRegion = false;
+    let isDrawing = false;
+    let drawStart = null;
+    let drawCurrent = null;
+    let referenceAvailable = false;
+
+    function getCanvasPoint(event) {
+      const bounds = canvas.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(canvas.width - 1, Math.round((event.clientX - bounds.left) * canvas.width / bounds.width))),
+        y: Math.max(0, Math.min(canvas.height - 1, Math.round((event.clientY - bounds.top) * canvas.height / bounds.height))),
+      };
+    }
+
+    function drawRegions() {
+      if (!referenceAvailable) return;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(imageObj, 0, 0);
+
+      regions.forEach((region, index) => {
+        context.lineWidth = index === selectedRegion ? 3 : 2;
+        context.strokeStyle = index === selectedRegion ? 'rgb(255, 153, 0)' : 'rgb(0, 180, 90)';
+        context.strokeRect(region.x, region.y, region.dx, region.dy);
+        context.fillStyle = context.strokeStyle;
+        context.font = 'bold 14px Arial';
+        context.fillText(String(index + 1), region.x + 2, Math.max(14, region.y - 3));
+      });
+
+      if (isDrawing && drawStart && drawCurrent) {
+        context.lineWidth = 2;
+        context.strokeStyle = 'rgb(255, 153, 0)';
+        context.strokeRect(drawStart.x, drawStart.y, drawCurrent.x - drawStart.x, drawCurrent.y - drawStart.y);
+      }
+    }
+
+    function updateRegionList() {
+      const selection = document.getElementById('roi_selection');
+      selection.replaceChildren();
+      regions.forEach((region, index) => {
+        const option = document.createElement('option');
+        option.value = index;
+        option.textContent = `Region ${index + 1}`;
+        selection.appendChild(option);
+      });
+      selection.disabled = regions.length === 0;
+      document.getElementById('remove_region').disabled = regions.length === 0;
+      document.getElementById('region_count').textContent =
+        regions.length === 0 ? 'No regions configured' : `${regions.length} region(s); all must match`;
+      if (regions.length === 0) selectedRegion = -1;
+      else {
+        selectedRegion = Math.max(0, Math.min(selectedRegion, regions.length - 1));
+        selection.value = String(selectedRegion);
+      }
+      selectionChanged();
+      drawRegions();
+    }
+
+    function selectionChanged() {
+      if (regions.length === 0 || selectedRegion < 0) {
+        ['roi_x', 'roi_y', 'roi_width', 'roi_height'].forEach((id) => {
+          document.getElementById(id).disabled = true;
+        });
+        return;
+      }
+
+      selectedRegion = parseInt(document.getElementById('roi_selection').value);
+      const region = regions[selectedRegion];
+      document.getElementById('roi_x').value = region.x;
+      document.getElementById('roi_y').value = region.y;
+      document.getElementById('roi_width').value = region.dx;
+      document.getElementById('roi_height').value = region.dy;
+      ['roi_x', 'roi_y', 'roi_width', 'roi_height'].forEach((id) => {
+        document.getElementById(id).disabled = false;
+      });
+      drawRegions();
+    }
+
+    function updateSelectedRegion() {
+      if (selectedRegion < 0) return;
+      const region = regions[selectedRegion];
+      region.dx = Math.max(1, Math.min(parseInt(document.getElementById('roi_width').value) || 1, canvas.width - 1));
+      region.dy = Math.max(1, Math.min(parseInt(document.getElementById('roi_height').value) || 1, canvas.height - 1));
+      region.x = parseInt(document.getElementById('roi_x').value) || 1;
+      region.y = parseInt(document.getElementById('roi_y').value) || 1;
+      region.x = Math.max(1, Math.min(region.x, canvas.width - region.dx));
+      region.y = Math.max(1, Math.min(region.y, canvas.height - region.dy));
+      document.getElementById('roi_x').value = region.x;
+      document.getElementById('roi_y').value = region.y;
+      document.getElementById('roi_width').value = region.dx;
+      document.getElementById('roi_height').value = region.dy;
+      drawRegions();
+    }
+
+    function startAddRegion() {
+      isAddingRegion = true;
+      firework.launch('Drag a rectangle around the display feature in the reference image.', 'info', 4000);
+    }
+
+    function removeSelectedRegion() {
+      if (selectedRegion < 0) return;
+      regions.splice(selectedRegion, 1);
+      selectedRegion = Math.min(selectedRegion, regions.length - 1);
+      updateRegionList();
+    }
+
+    canvas.addEventListener('mousedown', (event) => {
+      if (!isAddingRegion) return;
+      drawStart = getCanvasPoint(event);
+      drawCurrent = drawStart;
+      isDrawing = true;
+    });
+
+    canvas.addEventListener('mousemove', (event) => {
+      if (!isDrawing) return;
+      drawCurrent = getCanvasPoint(event);
+      drawRegions();
+    });
+
+    canvas.addEventListener('mouseup', (event) => {
+      if (!isDrawing) return;
+      drawCurrent = getCanvasPoint(event);
+      const x = Math.min(drawStart.x, drawCurrent.x);
+      const y = Math.min(drawStart.y, drawCurrent.y);
+      const dx = Math.max(1, Math.abs(drawCurrent.x - drawStart.x));
+      const dy = Math.max(1, Math.abs(drawCurrent.y - drawStart.y));
+      regions.push({ x, y, dx, dy });
+      selectedRegion = regions.length - 1;
+      isAddingRegion = false;
+      isDrawing = false;
+      drawStart = null;
+      drawCurrent = null;
+      updateRegionList();
+    });
+
+    async function saveValidation() {
+      const enabled = document.getElementById('validation_enabled').checked;
+      const threshold = parseInt(document.getElementById('similarity_threshold').value);
+      if (!Number.isInteger(threshold) || threshold < 1 || threshold > 100) {
+        firework.launch('Similarity threshold must be between 1 and 100.', 'warning', 4000);
+        return;
+      }
+      if (enabled && regions.length === 0) {
+        firework.launch('Add at least one display feature region before enabling validation.', 'warning', 4000);
+        return;
+      }
+      if (enabled && !referenceAvailable) {
+        firework.launch('The reference image is required when display validation is enabled.', 'warning', 4000);
+        return;
+      }
+      if (!confirm('Save and apply the display validation settings?')) return;
+
+      const delta = { imagealignment: {
+        displayvalidation: {
+          enabled,
+          similaritythreshold: threshold,
+          roi: regions.map(({ x, y, dx, dy }) => ({ x, y, dx, dy })),
+        },
+      } };
+      const saveButton = document.getElementById('save_validation');
+      saveButton.disabled = true;
+      try {
+        await saveConfig(JSON.stringify(delta), true);
+      } catch (error) {
+        console.error('Save display validation config failed:', error);
+        firework.launch('Saving display validation settings failed. See browser console for details.', 'error', 5000);
+        saveButton.disabled = false;
+      }
+    }
+
+    async function init() {
+      const loader = document.getElementById('img_loading');
+      if (loader) loader.src = loaderSpinner;
+      try {
+        await loadConfig();
+        const config = getConfigFromStorage();
+        const validation = config.imagealignment.displayvalidation || { enabled: false, similaritythreshold: 95, roi: [] };
+        document.getElementById('validation_enabled').checked = validation.enabled;
+        document.getElementById('similarity_threshold').value = validation.similaritythreshold;
+        regions = (validation.roi || []).map(({ x, y, dx, dy }) => ({ x, y, dx, dy }));
+        updateRegionList();
+        document.getElementById('save_validation').disabled = false;
+      } catch (error) {
+        console.error('Display validation initialization failed:', error);
+        firework.launch('Loading configuration failed. See browser console for details.', 'error', 5000);
+        return;
+      }
+
+      imageObj.onload = () => {
+        canvas.width = imageObj.width;
+        canvas.height = imageObj.height;
+        referenceAvailable = true;
+        drawRegions();
+        canvas.hidden = false;
+        document.getElementById('img_loading').hidden = true;
+        document.getElementById('add_region').disabled = false;
+      };
+      imageObj.onerror = () => {
+        document.getElementById('img_loading').hidden = true;
+        document.getElementById('canvas_message').textContent = 'Reference image unavailable. Create one before defining regions.';
+      };
+      imageObj.src = getDomainname() + '/fileserver/config/reference.jpg?' + Math.floor(Math.random() * 1000000 + 1);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      window.parent.postMessage({ type: 'iframe-ready' }, '*');
+    });
+    init();
+  </script>
+</body>
+
+</html>

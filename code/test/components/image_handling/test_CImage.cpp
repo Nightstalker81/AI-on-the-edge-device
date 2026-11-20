@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "CImage.h"
+#include "CImageTplMatch.h"
 #include "esp_log.h"
 
 
@@ -172,6 +173,51 @@ void test_CImage_move_assignment_operator(void)
 }
 
 
+void test_CImageTplMatch_compareTemplate(void)
+{
+    CImage source("validation-source", 6, 6, 3, true);
+    CImage templateImage("validation-template", 2, 2, 1, true);
+    TEST_ASSERT_TRUE(source.isValid());
+    TEST_ASSERT_TRUE(templateImage.isValid());
+
+    memset(source.getImgData(), 100, source.getImgDataSize());
+    const uint8_t templatePixels[] = {0, 255, 255, 0};
+    memcpy(templateImage.getImgData(), templatePixels, sizeof(templatePixels));
+
+    for (int y = 0; y < 2; ++y) {
+        for (int x = 0; x < 2; ++x) {
+            const uint8_t value = templatePixels[y * 2 + x];
+            uint8_t *pixel = source.getImgData() + ((y + 2) * source.getWidth() + x + 2) * source.getChannels();
+            pixel[0] = pixel[1] = pixel[2] = value;
+        }
+    }
+
+    AlignmentMarker marker{};
+    marker.markerImage = &templateImage;
+    marker.targetX = 2;
+    marker.targetY = 2;
+    float similarity = 0.0f;
+    TEST_ASSERT_EQUAL(TPL_MATCH_OK, CImageTplMatch::compareTemplate(source, marker, similarity));
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 100.0f, similarity);
+
+    marker.targetX = 1;
+    marker.searchX = 1;
+    TEST_ASSERT_EQUAL(TPL_MATCH_OK, CImageTplMatch::compareTemplate(source, marker, similarity));
+    TEST_ASSERT_EQUAL(2, marker.foundX);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 100.0f, similarity);
+
+    marker.targetX = 2;
+    marker.searchX = 0;
+    memset(source.getImgData() + (2 * source.getWidth() + 2) * source.getChannels(), 100, 2 * source.getChannels());
+    memset(source.getImgData() + (3 * source.getWidth() + 2) * source.getChannels(), 100, 2 * source.getChannels());
+    TEST_ASSERT_EQUAL(TPL_MATCH_OK, CImageTplMatch::compareTemplate(source, marker, similarity));
+    TEST_ASSERT_TRUE(similarity < 80.0f);
+
+    marker.markerImage = nullptr;
+    TEST_ASSERT_EQUAL(TPL_MATCH_ERROR_IMAGE, CImageTplMatch::compareTemplate(source, marker, similarity));
+}
+
+
 /**
  * @brief test CImage handling
  */
@@ -187,4 +233,5 @@ void test_CImageHandling()
     test_CImage_copy_assignment_operator();
     test_CImage_move_constructor();
     test_CImage_move_assignment_operator();
+    test_CImageTplMatch_compareTemplate();
 }

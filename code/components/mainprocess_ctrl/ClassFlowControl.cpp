@@ -294,6 +294,7 @@ bool ClassFlowControl::doFlowImageEvaluation(std::string time)
     bool result = true;
     FlowStateEvaluationEvent.clear();
     FlowStateEvaluationEvent.shrink_to_fit();
+    FlowStatePublishEvent.clear();
 
     for (int i = 0; i < FlowControlImage.size(); ++i) {
 #ifdef DEBUG_DETAIL_ON
@@ -331,6 +332,21 @@ bool ClassFlowControl::doFlowImageEvaluation(std::string time)
         }
     }
     return result;
+}
+
+
+bool ClassFlowControl::displayValidationRejected() const
+{
+    for (const auto *state : FlowStateEvaluationEvent) {
+        if (state->ClassName == "ClassFlowAlignment") {
+            for (int code : state->EventCode) {
+                if (code == -2) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 

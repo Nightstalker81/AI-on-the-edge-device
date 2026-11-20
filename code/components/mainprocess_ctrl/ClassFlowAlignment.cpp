@@ -93,6 +93,58 @@ bool ClassFlowAlignment::loadParameter()
         }
     }
 
+    if (cfgDataPtr->displayValidation.enabled) {
+        if (cfgDataPtr->displayValidation.roi.empty()) {
+            LogFile.writeToFile(ESP_LOG_ERROR, TAG, "Display validation enabled but no validation regions are configured");
+            return false;
+        }
+
+        const std::string referencePath = "/sdcard/config/reference.jpg";
+        CImage referenceImage("displayValidationReference", referencePath);
+        if (!referenceImage.isValid()) {
+            LogFile.writeToFile(ESP_LOG_ERROR, TAG, "Display validation reference image missing or invalid: " + referencePath);
+            return false;
+        }
+
+        int imageWidth = 640;
+        int imageHeight = 480;
+        cameraCtrl.getOutputFrameSize(imageWidth, imageHeight);
+        if (referenceImage.getWidth() != imageWidth || referenceImage.getHeight() != imageHeight) {
+            LogFile.writeToFile(ESP_LOG_ERROR, TAG, "Display validation reference image dimensions do not match camera output");
+            return false;
+        }
+
+        for (size_t i = 0; i < cfgDataPtr->displayValidation.roi.size(); ++i) {
+            const auto &roi = cfgDataPtr->displayValidation.roi[i];
+            if (roi.x < 0 || roi.y < 0 || roi.dx < 1 || roi.dy < 1 || roi.x >= imageWidth || roi.y >= imageHeight ||
+                roi.dx > imageWidth - roi.x || roi.dy > imageHeight - roi.y) {
+                LogFile.writeToFile(ESP_LOG_ERROR, TAG, "Display validation region " + std::to_string(i + 1) +
+                                                            " is outside the reference image");
+                return false;
+            }
+
+            AlignmentMarker marker{};
+            marker.targetX = roi.x;
+            marker.targetY = roi.y;
+            marker.width = roi.dx;
+            marker.height = roi.dy;
+            marker.searchX = 2;
+            marker.searchY = 2;
+            marker.markerImage =
+                new CImage("displayValidationRoi" + std::to_string(i + 1), roi.dx, roi.dy, referenceImage.getChannels(), true);
+            if (!marker.markerImage || !marker.markerImage->isValid()) {
+                delete marker.markerImage;
+                LogFile.writeToFile(ESP_LOG_ERROR, TAG, "Failed to allocate display validation template");
+                return false;
+            }
+            displayValidationMarkers.push_back(marker);
+            if (CImageMod::crop(referenceImage, roi.x, roi.y, roi.dx, roi.dy, *displayValidationMarkers.back().markerImage) != ESP_OK) {
+                LogFile.writeToFile(ESP_LOG_ERROR, TAG, "Failed to crop display validation template");
+                return false;
+            }
+        }
+    }
+
     return true;
 }
 
@@ -101,12 +153,15 @@ bool ClassFlowAlignment::doFlow(std::string time)
 {
     presetFlowStateHandler(false, time);
     if (!flowImageData->imgProcess) {
+        LogFile.writeToFile(ESP_LOG_ERROR, TAG, "Missing process image");
+        setFlowStateHandlerEvent(-3);
         return false;
     }
 
     CImage imgAlgRoi(*flowImageData->imgProcess);
     if (!imgAlgRoi.isValid()) {
         LogFile.writeToFile(ESP_LOG_ERROR, TAG, "Failed to create imgAlgRoi");
+        setFlowStateHandlerEvent(-3);
         return false;
     }
 
@@ -132,7 +187,7 @@ bool ClassFlowAlignment::doFlow(std::string time)
         cfgDataPtr->alignmentAlgo == ALIGNALGO_ROTATE_AND_ALIGN_SAD_3CH) {
         TplMatchStatus alignRetval = CImageTplMatch::invokeTplMatch(*flowImageData->imgProcess, imgAlgRoi, alignmentMarker[0],
                                                                     alignmentMarker[1]);
-        if (alignRetval == TPL_MATCH_FAILED) { // Alignment not successful
+        if (alignRetval != TPL_MATCH_OK) { // Alignment not successful
             LogFile.writeToFile(ESP_LOG_ERROR, TAG,
                                 "Fine alignment unsuccessful. Use alignment marker areas with sharp edges, unique shapes and high contrast "
                                 "on a sharply focused image");
@@ -140,6 +195,10 @@ bool ClassFlowAlignment::doFlow(std::string time)
         }
 
         drawAlignmentMarker(imgAlgRoi);
+    }
+
+    if (getFlowState()->isSuccessful && cfgDataPtr->displayValidation.enabled && !validateDisplay(*flowImageData->imgProcess)) {
+        setFlowStateHandlerEvent(-2);
     }
 
     if (getFlowState()->isSuccessful) {
@@ -159,6 +218,30 @@ bool ClassFlowAlignment::doFlow(std::string time)
         return false;
     }
 
+    return true;
+}
+
+
+bool ClassFlowAlignment::validateDisplay(CImage &image)
+{
+    const float threshold = static_cast<float>(cfgDataPtr->displayValidation.similarityThreshold);
+    for (size_t i = 0; i < displayValidationMarkers.size(); ++i) {
+        float similarity = 0.0f;
+        const TplMatchStatus status = CImageTplMatch::compareTemplate(image, displayValidationMarkers[i], similarity);
+        if (status != TPL_MATCH_OK) {
+            LogFile.writeToFile(ESP_LOG_ERROR, TAG, "Display validation comparison failed for region " + std::to_string(i + 1));
+            return false;
+        }
+        LogFile.writeToFile(ESP_LOG_DEBUG, TAG, "Display validation region " + std::to_string(i + 1) +
+                                                   " similarity: " + to_stringWithPrecision(similarity, 1) + "%");
+        if (similarity < threshold) {
+            LogFile.writeToFile(ESP_LOG_WARN, TAG,
+                                "Display validation rejected image: region " + std::to_string(i + 1) + " similarity " +
+                                    to_stringWithPrecision(similarity, 1) + "% below threshold " +
+                                    to_stringWithPrecision(threshold, 1) + "%");
+            return false;
+        }
+    }
     return true;
 }
 
@@ -215,5 +298,8 @@ ClassFlowAlignment::~ClassFlowAlignment()
 {
     for (int i = 0; i < 2; ++i) {
         delete alignmentMarker[i].markerImage;
+    }
+    for (auto &marker : displayValidationMarkers) {
+        delete marker.markerImage;
     }
 }

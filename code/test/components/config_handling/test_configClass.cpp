@@ -37,7 +37,8 @@ void test_configJsonParseAndSerialization()
         "\"specialeffect\":0,\"mirrorimage\":false,\"flipimage\":false,\"zoomfactor\":1000,\"zoomoffsetx\":0,\"zoomoffsety\":0},\"debug\":{"
         "\"saverawimages\":false,\"rawimageslocation\":\"/log/"
         "source\",\"rawimagesretention\":3}},\"imagealignment\":{\"alignmentalgo\":0,\"searchfield\":{\"x\":20,\"y\":20},\"imagerotation\":"
-        "\"0.0\",\"marker\":[{\"x\":1,\"y\":1},{\"x\":1,\"y\":1}],\"debug\":{\"savedebuginfo\":false}},\"numbersequences\":{\"sequence\":[{"
+        "\"0.0\",\"marker\":[{\"x\":1,\"y\":1},{\"x\":1,\"y\":1}],\"displayvalidation\":{\"enabled\":false,\"similaritythreshold\":95,"
+        "\"roi\":[]},\"debug\":{\"savedebuginfo\":false}},\"numbersequences\":{\"sequence\":[{"
         "\"sequenceid\":0,\"sequencename\":\"main\"}]},\"digit\":{\"enabled\":true,\"model\":\"dig-class100_0182_s2_q.tflite\","
         "\"cnngoodthreshold\":\"0.80\",\"sequence\":[{\"sequenceid\":0,\"sequencename\":\"main\",\"roi\":[]}],\"debug\":{\"saveroiimages\":"
         "false,\"roiimageslocation\":\"/log/"
@@ -93,6 +94,21 @@ void test_configJsonParseAndSerialization()
     // config_json_default_expected_start);
     ConfigClass::getInstance()->readConfigFile(true); // Use default config
     TEST_ASSERT_EQUAL_STRING(cfgDataExpexcted.c_str(), ConfigClass::getInstance()->getJsonBuffer());
+
+    ConfigClass::getInstance()->readConfigFile(
+        true, "{\"imagealignment\":{\"displayvalidation\":{\"enabled\":true,\"similaritythreshold\":101,"
+             "\"roi\":[{\"x\":12,\"y\":34,\"dx\":20,\"dy\":8}]}}}");
+    const auto *displayValidation = &ConfigClass::getInstance()->get()->sectionImageAlignment.displayValidation;
+    TEST_ASSERT_TRUE(displayValidation->enabled);
+    TEST_ASSERT_EQUAL(100, displayValidation->similarityThreshold);
+    TEST_ASSERT_EQUAL(1, displayValidation->roi.size());
+    TEST_ASSERT_EQUAL(12, displayValidation->roi[0].x);
+    TEST_ASSERT_EQUAL(34, displayValidation->roi[0].y);
+    TEST_ASSERT_EQUAL(20, displayValidation->roi[0].dx);
+    TEST_ASSERT_EQUAL(8, displayValidation->roi[0].dy);
+
+    ConfigClass::getInstance()->initCfgTmp();
+    ConfigClass::getInstance()->readConfigFile(true); // Restore defaults for following tests
 }
 
 /**

@@ -2,6 +2,7 @@
 #define CLASSFLOWALIGNMENT_H
 
 #include <string>
+#include <vector>
 
 #include "ClassFlowDefineTypes.h"
 #include "cfgDataStruct.h"
@@ -13,8 +14,10 @@ class ClassFlowAlignment : public ClassFlow
   protected:
     const CfgData::SectionImageAlignment *cfgDataPtr = NULL;
     AlignmentMarker alignmentMarker[2];
+    std::vector<AlignmentMarker> displayValidationMarkers;
 
     void drawAlignmentMarker(CImage &image);
+    bool validateDisplay(CImage &image);
 
     void doPostProcessEventHandling();
 

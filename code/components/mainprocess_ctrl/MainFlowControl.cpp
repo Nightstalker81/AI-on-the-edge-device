@@ -1100,7 +1100,13 @@ void task_autodoFlow(void *pvParameter)
                 LogFile.writeToFile(ESP_LOG_ERROR, TAG, "Image evaluation: Process error occured");
             }
 
-            taskAutoFlowState = FLOW_TASK_STATE_PUBLISH_DATA; // Continue with TASKS after FLOW FINISHED
+            if (flowctrl.displayValidationRejected()) {
+                LogFile.writeToFile(ESP_LOG_WARN, TAG, "Display validation rejected cycle; skip publishing results");
+                taskAutoFlowState = FLOW_TASK_STATE_ADDITIONAL_TASKS;
+            }
+            else {
+                taskAutoFlowState = FLOW_TASK_STATE_PUBLISH_DATA;
+            }
         }
 
         // PUBLISH DATA / RESULTS

@@ -329,6 +329,31 @@ void ConfigClass::parseSectionImageAlignment()
         cJsonUtils::parseIntClampedMin(el, {"y"}, section.marker[i].y, 1);
     }
 
+    auto &displayValidation = section.displayValidation;
+    cJsonUtils::parseBool(imgAlign, {"displayvalidation", "enabled"}, displayValidation.enabled);
+    cJsonUtils::parseIntClamped(imgAlign, {"displayvalidation", "similaritythreshold"}, displayValidation.similarityThreshold, 1, 100);
+    cJSON *displayValidationRoiArr = cJsonUtils::getNestedItem(imgAlign, {"displayvalidation", "roi"});
+    if (cJSON_IsArray(displayValidationRoiArr)) {
+        displayValidation.roi.clear();
+        for (int i = 0; i < cJSON_GetArraySize(displayValidationRoiArr); i++) {
+            cJSON *roiEl = cJSON_GetArrayItem(displayValidationRoiArr, i);
+            RoiElement roi{};
+            roi.x = -1;
+            roi.y = -1;
+            roi.dx = 0;
+            roi.dy = 0;
+            cJsonUtils::parseInt(roiEl, {"x"}, roi.x);
+            cJsonUtils::parseInt(roiEl, {"y"}, roi.y);
+            cJsonUtils::parseInt(roiEl, {"dx"}, roi.dx);
+            cJsonUtils::parseInt(roiEl, {"dy"}, roi.dy);
+            displayValidation.roi.push_back(roi);
+        }
+    }
+    else if (displayValidationRoiArr) {
+        LogFile.writeToFile(ESP_LOG_ERROR, TAG, "Display validation regions must be an array");
+        displayValidation.roi.clear();
+    }
+
     cJsonUtils::parseBool(imgAlign, {"debug", "savedebuginfo"}, section.debug.saveDebugInfo);
 }
 
@@ -936,6 +961,18 @@ esp_err_t ConfigClass::serializeConfig(bool unityTest)
         addEl(markerEl, "y", cfgDataTemp.sectionImageAlignment.marker[i].y);
     }
 
+    cJSON *displayValidation = addObj(imageAlignment, "displayvalidation");
+    addEl(displayValidation, "enabled", cfgDataTemp.sectionImageAlignment.displayValidation.enabled);
+    addEl(displayValidation, "similaritythreshold", cfgDataTemp.sectionImageAlignment.displayValidation.similarityThreshold);
+    cJSON *displayValidationRoiArr = addArr(displayValidation, "roi");
+    for (const auto &roi : cfgDataTemp.sectionImageAlignment.displayValidation.roi) {
+        cJSON *roiEl = addArrObj(displayValidationRoiArr);
+        addEl(roiEl, "x", roi.x);
+        addEl(roiEl, "y", roi.y);
+        addEl(roiEl, "dx", roi.dx);
+        addEl(roiEl, "dy", roi.dy);
+    }
+
     cJSON *imageAlignmentDebug = addObj(imageAlignment, "debug");
     addEl(imageAlignmentDebug, "savedebuginfo", cfgDataTemp.sectionImageAlignment.debug.saveDebugInfo);
 
@@ -1327,6 +1364,9 @@ esp_err_t ConfigClass::writeConfigFile()
 //**************************************************************************************************
 template <typename ConfigDataType> inline void clearConfigDataStructure(ConfigDataType &data)
 {
+    data.sectionImageAlignment.displayValidation.roi.clear();
+    decltype(data.sectionImageAlignment.displayValidation.roi)().swap(data.sectionImageAlignment.displayValidation.roi);
+
     // Clear and release outer sequence vectors
     data.sectionNumberSequences.sequence.clear();
     decltype(data.sectionNumberSequences.sequence)().swap(data.sectionNumberSequences.sequence);

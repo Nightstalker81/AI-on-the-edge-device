@@ -282,6 +282,11 @@ struct CfgData {
             int x = 1;
             int y = 1;
         } marker[2];
+        struct DisplayValidation {
+            bool enabled = false;
+            int similarityThreshold = 95;
+            std::vector<RoiElement> roi;
+        } displayValidation;
         struct Debug {
             bool saveDebugInfo = false;
             bool saveAllFiles = false;

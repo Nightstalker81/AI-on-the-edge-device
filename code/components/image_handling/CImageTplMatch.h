@@ -53,6 +53,15 @@ class CImageTplMatch
      */
     static TplMatchStatus invokeTplMatch(CImage &img, CImage &imgTarget, AlignmentMarker &marker1, AlignmentMarker &marker2,
                                          TplMatchAlgorithm tplMatchAlgorithm = TplMatchAlgorithm::SAD);
+
+    /**
+     * @brief Compares a template with the source image near its configured target position
+     * @param img Source image
+     * @param marker Template image and target position
+     * @param similarity Best normalized similarity in percent
+     * @return Status code
+     */
+    static TplMatchStatus compareTemplate(CImage &img, AlignmentMarker &marker, float &similarity);
 };
 
 #endif // CIMAGETPLMATCH_H

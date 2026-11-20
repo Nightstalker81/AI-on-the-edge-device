@@ -13,6 +13,8 @@ Image alignment is done in two steps:
 1. Rotate image by `Image Rotation` angle
 2. Use matching algorithm to find best pattern match for the alignment marker image in defined search area (`SearchFieldX`, `SearchFieldY`)
 
+Optionally, [Display Validation](./DisplayValidation.md) can check stable display features after alignment and before recognition.
+
 
 ### Input Options
 

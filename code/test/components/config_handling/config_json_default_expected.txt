@@ -58,6 +58,11 @@ Modify JSON elements accordingly to test default values and stringfy as compact 
         "y": 1
       }
     ],
+    "displayvalidation": {
+      "enabled": false,
+      "similaritythreshold": 95,
+      "roi": []
+    },
     "debug": {
       "savedebuginfo": false
     }

@@ -74,6 +74,7 @@ class ClassFlowControl : public ClassFlow
     bool loadParameter();
     bool doFlowImageEvaluation(std::string time);
     bool doFlowPublishData(std::string time);
+    bool displayValidationRejected() const;
 
     bool getStatusSetupModus();
     float getProcessInterval();

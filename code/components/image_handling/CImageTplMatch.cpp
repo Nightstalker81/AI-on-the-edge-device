@@ -101,6 +101,82 @@ TplMatchStatus IRAM_ATTR CImageTplMatch::invokeTplMatch(CImage &img, CImage &img
 }
 
 
+TplMatchStatus CImageTplMatch::compareTemplate(CImage &img, AlignmentMarker &marker, float &similarity)
+{
+    similarity = 0.0f;
+    if (!img.isValid() || marker.markerImage == nullptr || !marker.markerImage->isValid()) {
+        LogFile.writeToFile(ESP_LOG_ERROR, TAG, "compareTemplate: Invalid source or template image");
+        return TPL_MATCH_ERROR_IMAGE;
+    }
+
+    const int imgWidth = img.getWidth();
+    const int imgHeight = img.getHeight();
+    const int imgChannels = img.getChannels();
+    const int tplWidth = marker.markerImage->getWidth();
+    const int tplHeight = marker.markerImage->getHeight();
+    const int tplChannels = marker.markerImage->getChannels();
+    if ((imgChannels != 1 && imgChannels != 3) || (tplChannels != 1 && tplChannels != 3) || tplWidth <= 0 ||
+        tplHeight <= 0 || tplWidth > imgWidth || tplHeight > imgHeight) {
+        LogFile.writeToFile(ESP_LOG_ERROR, TAG, "compareTemplate: Incompatible source and template image dimensions");
+        return TPL_MATCH_ERROR_IMAGE;
+    }
+
+    const CImage *first = (&img < marker.markerImage) ? &img : marker.markerImage;
+    const CImage *second = (&img < marker.markerImage) ? marker.markerImage : &img;
+    CImageLockGuard lock1(*first);
+    CImageLockGuard lock2(*second);
+    if (!lock1.isLocked() || !lock2.isLocked()) {
+        LogFile.writeToFile(ESP_LOG_ERROR, TAG, "compareTemplate: Failed to lock");
+        return TPL_MATCH_ERROR_TIMEOUT;
+    }
+
+    const uint8_t *imgData = img.getImgData();
+    const uint8_t *tplData = marker.markerImage->getImgData();
+    const int searchX = std::max(marker.searchX, 0);
+    const int searchY = std::max(marker.searchY, 0);
+    const int xStart = std::clamp(marker.targetX - searchX, 0, imgWidth - tplWidth);
+    const int xStop = std::clamp(marker.targetX + searchX, 0, imgWidth - tplWidth);
+    const int yStart = std::clamp(marker.targetY - searchY, 0, imgHeight - tplHeight);
+    const int yStop = std::clamp(marker.targetY + searchY, 0, imgHeight - tplHeight);
+    uint64_t sadMin = UINT64_MAX;
+
+    for (int y = yStart; y <= yStop; ++y) {
+        for (int x = xStart; x <= xStop; ++x) {
+            uint64_t sadSum = 0;
+            for (int templateY = 0; templateY < tplHeight; ++templateY) {
+                for (int templateX = 0; templateX < tplWidth; ++templateX) {
+                    const int sourceIndex = ((y + templateY) * imgWidth + x + templateX) * imgChannels;
+                    const int templateIndex = (templateY * tplWidth + templateX) * tplChannels;
+
+                    const int sourceGray = imgChannels == 1
+                                               ? imgData[sourceIndex]
+                                               : (77 * imgData[sourceIndex] + 150 * imgData[sourceIndex + 1] +
+                                                  29 * imgData[sourceIndex + 2]) >> 8;
+                    const int templateGray = tplChannels == 1
+                                                 ? tplData[templateIndex]
+                                                 : (77 * tplData[templateIndex] + 150 * tplData[templateIndex + 1] +
+                                                    29 * tplData[templateIndex + 2]) >> 8;
+                    sadSum += abs(templateGray - sourceGray);
+                }
+                if (sadSum >= sadMin) {
+                    break;
+                }
+            }
+
+            if (sadSum < sadMin) {
+                sadMin = sadSum;
+                marker.foundX = x;
+                marker.foundY = y;
+            }
+        }
+    }
+
+    const float maxDifference = static_cast<float>(tplWidth) * tplHeight * 255.0f;
+    similarity = (1.0f - static_cast<float>(sadMin) / maxDifference) * 100.0f;
+    return TPL_MATCH_OK;
+}
+
+
 TplMatchStatus IRAM_ATTR CImageTplMatch::tplMatchBySad(CImage &img, AlignmentMarker &marker)
 {
     if (!img.isValid()) {
